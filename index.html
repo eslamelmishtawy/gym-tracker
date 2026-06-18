@@ -126,6 +126,13 @@
   .startcard.rest{background:linear-gradient(180deg, rgba(154,156,140,.12), rgba(154,156,140,.02));border-color:var(--line);}
   .startcard.rest .scname{color:var(--muted);}
   .startcard .scsub{font-size:13px;color:var(--muted);margin:-6px 0 14px;}
+  .prep{display:flex;flex-direction:column;gap:2px;}
+  .prow{display:flex;align-items:center;gap:12px;padding:11px 4px;border-top:1px solid var(--line);cursor:pointer;}
+  .prow:first-child{border-top:none;}
+  .pcheck{width:22px;height:22px;border:1.5px solid var(--line);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--accent);font-size:13px;flex-shrink:0;}
+  .prow.on .pcheck{border-color:var(--accent);background:rgba(201,242,61,.12);}
+  .ptxt{font-size:14px;}
+  .prow.on .ptxt{color:var(--muted);text-decoration:line-through;}
   .recent{margin-top:26px;}
   .recenth{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
   .wrow{display:flex;gap:14px;align-items:baseline;padding:9px 2px;border-top:1px solid var(--line);}
@@ -226,14 +233,21 @@
     { name:'Seated calf raise',           range:[12,15], increment:5,   sets:3 },
   ];
 
+  const _WU_UPPER = ['5 min easy bike or brisk walk','Band pull-aparts · 2×15','Band shoulder dislocates · ×10','2 ramp-up sets on the first lift'];
+  const _WU_LOWER = ['5 min easy bike or brisk walk','Glute bridges · 2×12','Bodyweight squats to comfortable depth · ×10','2 ramp-up sets on the first lift'];
+  const _FIN = ['Plank · 2×30–45s','Pallof press · 2×10/side','Dead bug · 2×8/side','Half-kneeling hip-flexor stretch · 30s/side'];
   const _DAYS_DEFAULT = [
     { id:'upperA', name:'Upper A', engine:true, sub:'Push + pull · 6 lifts',
+      warmup:_WU_UPPER, finisher:_FIN,
       lifts:['Incline DB press','Chest-supported row','Seated shoulder press','Lat pulldown','Lateral raise','Triceps pushdown'] },
     { id:'lowerA', name:'Lower A', engine:true, sub:'Quad lead · 5 lifts',
+      warmup:_WU_LOWER, finisher:_FIN,
       lifts:['Leg press','Hip thrust','Seated leg curl','Bulgarian split squat','Standing calf raise'] },
     { id:'upperB', name:'Upper B', engine:true, sub:'New angles · 6 lifts',
+      warmup:_WU_UPPER, finisher:_FIN,
       lifts:['Flat DB press','Neutral-grip lat pulldown','Seated cable row','Lateral raise','DB biceps curl','Overhead cable triceps ext'] },
     { id:'lowerB', name:'Lower B', engine:true, sub:'Hamstring + glute lead · 5 lifts',
+      warmup:_WU_LOWER, finisher:_FIN,
       lifts:['Lying leg curl','45° back extension','Leg extension','Reverse lunge (DB)','Seated calf raise'] },
     { id:'bw', name:'Bodyweight', engine:false, sub:'Core · mobility · conditioning',
       blocks:[
@@ -265,13 +279,14 @@
 
   // ---- persistence (keyed by lift name) ----
   const STORE_KEY = 'gym.program.v1';
+  const PROGRAM_VERSION = 3;
   function save(){
     try {
       const data = EXERCISES.map((e, i) => ({
         name:e.name, currentWeight:exState[i].currentWeight,
         missStreak:exState[i].missStreak, history:exState[i].history
       }));
-      localStorage.setItem(STORE_KEY, JSON.stringify({ next:nextSplitId, program, lifts:data, bw:bwHistory, wl:workoutLog, body:bodyScans }));
+      localStorage.setItem(STORE_KEY, JSON.stringify({ next:nextSplitId, pv:PROGRAM_VERSION, program, lifts:data, bw:bwHistory, wl:workoutLog, body:bodyScans }));
     } catch(e){}
   }
   function load(){
@@ -542,10 +557,29 @@
     run.phase = exState[curLiftIndex()].currentWeight == null ? 'start' : 'set';
   }
   function startWorkout(id){
-    run = { splitId:id, exPos:0, setIdx:0, reps:[], effort:null, phase:'set', restLeft:0, outcomes:[] };
-    if (DAYS.find(x => x.id === id).engine) resetExercise();
+    const day = DAYS.find(x => x.id === id);
+    run = { splitId:id, exPos:0, setIdx:0, reps:[], effort:null, phase:'set', restLeft:0, outcomes:[],
+            stage:'lifts', warmTicks:{}, finTicks:{} };
+    if (day.engine){
+      if (Array.isArray(day.warmup) && day.warmup.length) run.stage = 'warmup';
+      else resetExercise();
+    }
     view = 'workout'; renderApp(); window.scrollTo({top:0,behavior:'smooth'});
   }
+  function prepHTML(items, tickKey){
+    const rows = items.map((txt, i) => {
+      const on = !!run[tickKey][i];
+      return `<div class="prow ${on?'on':''}" onclick="prepTick('${tickKey}',${i},this)">`
+        + `<span class="pcheck">${on?'\u2713':''}</span><span class="ptxt">${txt}</span></div>`;
+    }).join('');
+    return `<div class="card"><div class="prep">${rows}</div></div>`;
+  }
+  function prepTick(key, i, el){
+    run[key][i] = !run[key][i];
+    el.classList.toggle('on', run[key][i]);
+    el.querySelector('.pcheck').textContent = run[key][i] ? '\u2713' : '';
+  }
+  function startLifting(){ run.stage = 'lifts'; resetExercise(); renderApp(); window.scrollTo({top:0,behavior:'smooth'}); }
   function renderWorkout(){
     const d = DAYS.find(x => x.id === run.splitId);
     document.getElementById('dayTitle').textContent = d.name;
@@ -553,6 +587,19 @@
       document.getElementById('daySub').textContent = d.sub || '';
       document.getElementById('dayview').innerHTML = `<div class="fadein">${bodyweightHTML(d)}`
         + `<button onclick="finishWorkout()">Done · back to dashboard</button></div>`;
+      return;
+    }
+    if (run.stage === 'warmup'){
+      document.getElementById('daySub').textContent = 'Warm-up';
+      document.getElementById('dayview').innerHTML = `<div class="fadein"><div class="daynote">Loosen up first — tick what you do, then start lifting.</div>${prepHTML(d.warmup, 'warmTicks')}`
+        + `<button onclick="startLifting()">Start lifting \u2192</button>`
+        + `<button class="ghost quit" onclick="quitWorkout()">Quit to dashboard</button></div>`;
+      return;
+    }
+    if (run.stage === 'finisher'){
+      document.getElementById('daySub').textContent = 'Core & mobility';
+      document.getElementById('dayview').innerHTML = `<div class="fadein"><div class="daynote">Lifts done. Finish with core and mobility — neutral spine throughout.</div>${prepHTML(d.finisher, 'finTicks')}`
+        + `<button onclick="finishWorkout()">Finish workout \u2713</button></div>`;
       return;
     }
     document.getElementById('daySub').textContent = `Exercise ${run.exPos+1} of ${d.lifts.length}`;
@@ -637,6 +684,7 @@
     run.outcomes.push({ name:EXERCISES[i].name, decision:out.decision });
     save();
     if (run.exPos < d.lifts.length-1){ run.exPos++; resetExercise(); renderApp(); window.scrollTo({top:0,behavior:'smooth'}); }
+    else if (Array.isArray(d.finisher) && d.finisher.length){ run.stage = 'finisher'; renderApp(); window.scrollTo({top:0,behavior:'smooth'}); }
     else finishWorkout();
   }
   function finishWorkout(){
@@ -784,16 +832,21 @@
     ev.target.value = '';
   }
 
-  function migrateRest(){
-    if (localStorage.getItem('gym.restMigrated')) return;
-    localStorage.setItem('gym.restMigrated', '1');
-    if (ROTATION.some(id => (DAYS.find(x => x.id === id) || {}).rest)) return;   // already has rest
-    const stock = ['upperA','lowerA','upperB','lowerB','bw'].sort().join(',');
-    if (DAYS.map(d => d.id).sort().join(',') === stock){ applyProgram(DEFAULT_PROGRAM); save(); }
+  function isStockProgram(){
+    const defEng = DEFAULT_PROGRAM.days.filter(d => d.engine), curEng = DAYS.filter(d => d.engine);
+    if (curEng.length !== defEng.length) return false;
+    return defEng.every(dd => { const cd = curEng.find(c => c.id === dd.id); return cd && JSON.stringify(cd.lifts) === JSON.stringify(dd.lifts); });
+  }
+  function migrateProgram(){
+    let pv = 0;
+    try { pv = (JSON.parse(localStorage.getItem(STORE_KEY) || '{}').pv) || 0; } catch(e){}
+    if (pv >= PROGRAM_VERSION) return;
+    if (isStockProgram()) applyProgram(DEFAULT_PROGRAM);   // refresh stock program to current default, progress kept by name
+    save();
   }
 
   load();
-  migrateRest();
+  migrateProgram();
   renderApp();
 </script>
 
